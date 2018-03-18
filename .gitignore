@@ -1,0 +1,9 @@
+# ignore any library in project(see README.md to install libray)
+/*/*
+
+# download directory
+!/jpg/.gitignore
+!/csv/.gitignore
+
+# output file to check
+*.json
