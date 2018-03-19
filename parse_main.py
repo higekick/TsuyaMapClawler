@@ -6,6 +6,7 @@ from urllib.request import urlopen
 import json
 import datetime
 import hashlib
+import os
 
 # import BeautifulSoup library
 from bs4 import BeautifulSoup
@@ -23,7 +24,7 @@ urlResBase = "http://www.okayama-opendata.jp/opendata/ga130PreAction.action?keyT
 IDX_START = 1
 
 # 読み込みページ数
-count_page = 14
+count_page = 11
 
 # パースメインメソッド
 def parseNews(news_url):
@@ -61,6 +62,7 @@ def parseNews(news_url):
         hiddenFld = content.find('div')
         inpDataSetID = hiddenFld.find('input',{"id":"datasetId"}).get('value')
         inpKeyTitle = hiddenFld.find('input',{"id":"keyTitle"}).get('value')
+        datasetName = hiddenFld.find('input',{"id":"title"}).get('value')
         urlDataSet = urlDataSetBase.replace("__DATASETID__",inpDataSetID).replace("__KEYTITLEID__",inpKeyTitle)
         resourceIds = getResourceId(urlDataSet)
 
@@ -74,7 +76,7 @@ def parseNews(news_url):
                     "file": s_url
                     }
             resUrls.append(a_resUrl)
-            downloadFile(s_url, fmt)
+            downloadFile(s_url, fmt, datasetName)
 
         # "news_type" : news_type.get_text(),
         itemData = {
@@ -109,12 +111,20 @@ def getResFileNm(url):
     ret = plainValue.replace('\r\n','').replace('\t','')
     return ret
 
-def downloadFile(url, fileType):
+def downloadFile(url, fileType, dirName):
     print('downloading.. ' + url)
     resFile = urlopen(url)
     tmp = url.split('/')
     fileName = tmp[-1]
-    path = './' + fileType + '/' + fileName
+    dirPath = './' + fileType + '/' + dirName + '/'
+
+    # if dir not exists, make it.
+    if not os.path.exists(dirPath) and not os.path.isdir(dirPath):
+        print ("dir not exists.")
+        os.mkdir(dirPath)
+
+    # download it
+    path =  dirPath + fileName
     with open(path,'wb') as output:
         output.write(resFile.read())
 
