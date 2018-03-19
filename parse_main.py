@@ -7,6 +7,7 @@ import json
 import datetime
 import hashlib
 import os
+import codecs
 
 # import BeautifulSoup library
 from bs4 import BeautifulSoup
@@ -24,7 +25,7 @@ urlResBase = "http://www.okayama-opendata.jp/opendata/ga130PreAction.action?keyT
 IDX_START = 1
 
 # 読み込みページ数
-count_page = 11
+count_page = 1
 
 # パースメインメソッド
 def parseNews(news_url):
@@ -119,14 +120,134 @@ def downloadFile(url, fileType, dirName):
     dirPath = './' + fileType + '/' + dirName + '/'
 
     # if dir not exists, make it.
-    if not os.path.exists(dirPath) and not os.path.isdir(dirPath):
-        print ("dir not exists.")
-        os.mkdir(dirPath)
+    mkDir(dirPath)
 
     # download it
     path =  dirPath + fileName
     with open(path,'wb') as output:
         output.write(resFile.read())
+
+    # parse csv
+    if fileType == 'csv':
+        parseCsv(dirName, fileName)
+
+NAME = 'name'
+ADDRESS = 'address'
+TEL = 'tel'
+FAX = 'fax'
+URL = 'url'
+MEMO = 'memo'
+ALT = 'alt'
+LON = 'lon'
+
+def parseCsv(dirName, fileName):
+    dirInPath = './csv/' + dirName + '/'
+    mkDir('./csv/')
+    mkDir(dirInPath)
+    dirOutPath = './json/' + dirName + '/'
+    mkDir('./json/')
+    mkDir(dirOutPath)
+
+    fileNameIn = dirInPath + fileName
+    fileNameOut = dirOutPath + fileName.replace('.csv', '.json')
+
+    jsnObj = []
+    fin = None
+    fout = None
+    try:
+        fin  = codecs.open(fileNameIn, 'r', 'shift_jis')
+        fout = codecs.open(fileNameOut, 'w', 'utf-8')
+        print("convert to json..")
+
+        idxs = {
+            NAME : None,
+            ADDRESS : None,
+            TEL : None,
+            FAX : None,
+            URL : None,
+            MEMO : None,
+            ALT : None,
+            LON : None
+        }
+
+        for i, row in enumerate(fin):
+
+            if i == 0:
+                heads = row.split(',')
+                for idx, item in enumerate(heads):
+                    head = getHead(item)
+                    print('head: ' + str(head))
+                    if head is not None:
+                        idxs[head] = idx
+            else:
+                dt = row.split(',')
+                j = {
+                    NAME : getColValue(NAME, idxs, dt),
+                    ADDRESS : getColValue(ADDRESS, idxs, dt),
+                    TEL : getColValue(TEL, idxs, dt),
+                    FAX : getColValue(FAX, idxs, dt),
+                    URL : getColValue(URL, idxs, dt),
+                    MEMO : getColValue(MEMO, idxs, dt),
+                    ALT : getColValue(ALT, idxs, dt),
+                    LON : getColValue(LON, idxs, dt)
+                }
+                jsnObj.append(j)
+
+        jsonStr = json.dumps(jsnObj, ensure_ascii=False, indent=4)
+        fout.write(jsonStr)
+    except Exception as e:
+        print(e)
+        return
+    finally:
+        if fout is not None:
+            fout.close()
+        if fin is not None:
+            fin.close()
+
+def getHead(item):
+    item = item.replace('"','').replace("'",'').rstrip('\n').strip()
+
+    # colmun candidates
+    name = ['名称', '施設名', '分団名']
+    address = ['住所', '地番', '機庫所在地']
+    tel = ['TEL', '電話番号']
+    fax = ['FAX']
+    url = ['URL']
+    memo = ['設置場所', '備考', '備考1']
+    alt = ['世界_10進_Y']
+    lon = ['世界_10進_X']
+
+    if item in name:
+        return NAME
+    if item in address:
+        return ADDRESS
+    if item in tel:
+        return TEL
+    if item in fax:
+        return FAX
+    if item in url:
+        return URL
+    if item in memo:
+        return MEMO
+    if item in alt:
+        return ALT
+    if item in lon:
+        return LON
+
+    return None
+
+def getColValue(key, idxs, row):
+    idx = idxs[key]
+    if idx == None:
+        return None
+    else:
+        val = row[idx].replace('"','').replace("'",'').rstrip('\n').strip()
+        return val
+
+def mkDir(dirPath):
+    if not os.path.exists(dirPath) and not os.path.isdir(dirPath):
+        print ("dir not exists.")
+        os.mkdir(dirPath)
 
 # parse start
 print("start..")
