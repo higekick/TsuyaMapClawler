@@ -30,9 +30,7 @@ def resizeImage():
         b = os.path.getsize(filepath)
         size = b/1024/1024
         sizeStr = str(size)
-        # print(sizeStr + ':' + os.path(filename))
         if (size >= 1.0):
-            print(sizeStr + " :" + filename)
             img = Image.open(filepath)
             scale = int(size)
             imgSml = img.resize( (int(img.width/scale), int(img.height/scale)) )
@@ -54,9 +52,7 @@ def resizeImage(dirName, fileName):
         b = os.path.getsize(filepath)
         size = b/1024/1024
         sizeStr = str(size)
-        # print(sizeStr + ':' + os.path(filename))
         if (size >= 1.0):
-            print(sizeStr + " :" + fileName)
             img = Image.open(filepath)
             scale = int(size)
             imgSml = img.resize( (int(img.width/scale), int(img.height/scale)) )

@@ -54,7 +54,6 @@ def parseCsv(dirName, fileName):
                 heads = row.split(',')
                 for idx, item in enumerate(heads):
                     head = getHead(item)
-                    print('head: ' + str(head))
                     if head is not None:
                         idxs[head] = idx
             else:

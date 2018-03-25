@@ -7,6 +7,7 @@ import datetime
 import hashlib
 import os
 import codecs
+from multiprocessing import Process
 
 # import BeautifulSoup library
 from bs4 import BeautifulSoup
@@ -34,7 +35,7 @@ COUNT_PAGE = int(os.environ['COUNT_PAGE'])
 TMP_DIR = ut.TMP_DIR
 
 # パースメインメソッド
-def parseMain(url):
+def parseMain(url, dummy):
 
     try:
         html = urlopen(url)
@@ -92,7 +93,7 @@ def getResFileNm(url):
     return ret
 
 def downloadFile(url, fileType, dirName):
-    print('downloading.. ' + url)
+    # print('downloading.. ' + url)
     resFile = urlopen(url)
     tmp = url.split('/')
     fileName = tmp[-1]
@@ -104,7 +105,6 @@ def downloadFile(url, fileType, dirName):
 
     # download it
     path =  dirPath + fileName
-    print(path)
     with open(path,'wb') as output:
         output.write(resFile.read())
 
@@ -120,7 +120,7 @@ def downloadFile(url, fileType, dirName):
     # upload to s3 bucket
     if not isinstance(outpath,type(None)):
         prefix = fileType + '/' + dirName
-        ul.uploadToBucket(outpath, fileType)
+        ul.uploadToBucket(outpath, prefix)
 
 def main():
     # parse start
@@ -132,14 +132,18 @@ def main():
 
     # roopパース
     index = IDX_START
+    p = None
     while IDX_START <= index and index <= int(COUNT_PAGE):
         # 経過をログ出力
         print("page index is " + str(index))
         # パース対象ページのURLを取得
         targetUrl = mainURL.replace("__PAGE__", str(index) )
         # 読み込んでパース
-        parseMain(targetUrl)
+        p = Process(target=parseMain, args=(targetUrl, 'dummy'))
+        p.start()
         index +=1
+    if p:
+        p.join()
 
     # finish
     print("finish!")

@@ -7,5 +7,4 @@ TMP_DIR = '/tmp/'
 
 def mkDir(dirPath):
     if not os.path.exists(dirPath) and not os.path.isdir(dirPath):
-        print ("dir not exists.")
         os.mkdir(dirPath)
