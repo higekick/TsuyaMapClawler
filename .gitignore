@@ -7,3 +7,5 @@
 
 # output file to check
 *.json
+
+*.zip

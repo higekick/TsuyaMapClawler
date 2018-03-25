@@ -3,7 +3,6 @@ from __future__ import unicode_literals
 
 import urllib.request, urllib.error
 from urllib.request import urlopen
-import json
 import datetime
 import hashlib
 import os
@@ -11,8 +10,11 @@ import codecs
 
 # import BeautifulSoup library
 from bs4 import BeautifulSoup
-# import css parse function
-#import parse_css as pc
+
+import parseCsv2Json as pcj
+import resizeImage as rimg
+import util as ut
+import util_lambda as ul
 
 # メインのURL
 mainURL = "http://www.okayama-opendata.jp/opendata/ga110Action.action?lnkOptionsBean.txtKeyword=&currentPage=__PAGE__&pageCount=13&searchString=q%3D%28organization%3A33203%29&paramName=&action=clickLnkSelectedPage&cboSort=01&paramOrgName=33203&paramTagsName=&paramFormatName=&paramLicenseName=&rssUrl=http%3A%2F%2Fwww.okayama-opendata.jp%2Fckan"
@@ -22,21 +24,20 @@ urlDataSetBase = "http://www.okayama-opendata.jp/opendata/ga120PreAction.action?
 urlResBase = "http://www.okayama-opendata.jp/opendata/ga130PreAction.action?keyTitle=__KEYTITLEID__&resourceId=__RESID__&datasetId=__DATASETID__"
 
 # start page (the minimum page is 1)
-IDX_START = 1
+#IDX_START = 13
+IDX_START = int(os.environ['IDX_START'])
 
 # 読み込みページ数
-count_page = 1
+#COUNT_PAGE = 13
+COUNT_PAGE = int(os.environ['COUNT_PAGE'])
+
+TMP_DIR = ut.TMP_DIR
 
 # パースメインメソッド
-def parseNews(news_url):
-    """
-        引数のURLをパースし、結果をリストに詰めます。
-        成功の場合Trueを返し、
-        引数のURLが存在しないなど失敗の場合Falseを返します
-    """
+def parseMain(url):
 
     try:
-        html = urlopen(news_url)
+        html = urlopen(url)
     except:
         return None
 
@@ -50,7 +51,6 @@ def parseNews(news_url):
     if isinstance(items, type(None)) or not items:
         return None
 
-    itemList = []
     for item in items:
         content = item.find('div',{"class":"dataset-content"})
         dtfmt = content.find('ul',{"class":"dataset-resources"})
@@ -68,31 +68,10 @@ def parseNews(news_url):
         resourceIds = getResourceId(urlDataSet)
 
         arrayResIds = resourceIds.split(",")
-        # resourceUrls
-        resUrls = []
         for aId in arrayResIds:
             a_url = urlResBase.replace("__DATASETID__",inpDataSetID).replace("__KEYTITLEID__",inpKeyTitle).replace("__RESID__",aId)
             s_url = getResFileNm(a_url)
-            a_resUrl = {
-                    "file": s_url
-                    }
-            resUrls.append(a_resUrl)
             downloadFile(s_url, fmt, datasetName)
-
-        # "news_type" : news_type.get_text(),
-        itemData = {
-                "dataType" : fmt,
-                "name" : name,
-                "datasetId" : inpDataSetID,
-                "keyTitle" : inpKeyTitle,
-                "resourceId" : resourceIds,
-                "urlRes" : resUrls
-                }
-
-        # add to list
-        itemList.append(itemData)
-
-    return itemList
 
 def getResourceId(url):
     try:
@@ -117,171 +96,59 @@ def downloadFile(url, fileType, dirName):
     resFile = urlopen(url)
     tmp = url.split('/')
     fileName = tmp[-1]
-    dirPath = './' + fileType + '/' + dirName + '/'
+    dirPath = TMP_DIR + fileType + '/' + dirName + '/'
 
-    # if dir not exists, make it.
-    mkDir(dirPath)
+    # if dir not exists, make it. ./tmp/csv or ./tmp/jpg
+    ut.mkDir(TMP_DIR + fileType)
+    ut.mkDir(dirPath)
 
     # download it
     path =  dirPath + fileName
+    print(path)
     with open(path,'wb') as output:
         output.write(resFile.read())
 
-    # parse csv
+    outpath = ''
     if fileType == 'csv':
-        parseCsv(dirName, fileName)
+        # parse csv and convert to json
+        outpath = pcj.parseCsv(dirName, fileName)
+        fileType = 'json'
+    elif fileType == 'jpg':
+        # resize jpg to small
+        outpath = rimg.resizeImage(dirName, fileName)
 
-NAME = 'name'
-ADDRESS = 'address'
-TEL = 'tel'
-FAX = 'fax'
-URL = 'url'
-MEMO = 'memo'
-ALT = 'alt'
-LON = 'lon'
+    # upload to s3 bucket
+    if not isinstance(outpath,type(None)):
+        prefix = fileType + '/' + dirName
+        ul.uploadToBucket(outpath, fileType)
 
-def parseCsv(dirName, fileName):
-    dirInPath = './csv/' + dirName + '/'
-    mkDir('./csv/')
-    mkDir(dirInPath)
-    dirOutPath = './json/' + dirName + '/'
-    mkDir('./json/')
-    mkDir(dirOutPath)
+def main():
+    # parse start
+    print("start..")
+    print(datetime.datetime.now())
 
-    fileNameIn = dirInPath + fileName
-    fileNameOut = dirOutPath + fileName.replace('.csv', '.json')
+    # delete s3 contents
+    ul.delDirInBucket()
 
-    jsnObj = []
-    fin = None
-    fout = None
-    try:
-        fin  = codecs.open(fileNameIn, 'r', 'shift_jis')
-        fout = codecs.open(fileNameOut, 'w', 'utf-8')
-        print("convert to json..")
+    # roopパース
+    index = IDX_START
+    while IDX_START <= index and index <= int(COUNT_PAGE):
+        # 経過をログ出力
+        print("page index is " + str(index))
+        # パース対象ページのURLを取得
+        targetUrl = mainURL.replace("__PAGE__", str(index) )
+        # 読み込んでパース
+        parseMain(targetUrl)
+        index +=1
 
-        idxs = {
-            NAME : None,
-            ADDRESS : None,
-            TEL : None,
-            FAX : None,
-            URL : None,
-            MEMO : None,
-            ALT : None,
-            LON : None
-        }
+    # finish
+    print("finish!")
+    print(datetime.datetime.now())
 
-        for i, row in enumerate(fin):
+# from local
+if __name__ == '__main__':
+    main()
 
-            if i == 0:
-                heads = row.split(',')
-                for idx, item in enumerate(heads):
-                    head = getHead(item)
-                    print('head: ' + str(head))
-                    if head is not None:
-                        idxs[head] = idx
-            else:
-                dt = row.split(',')
-                j = {
-                    NAME : getColValue(NAME, idxs, dt),
-                    ADDRESS : getColValue(ADDRESS, idxs, dt),
-                    TEL : getColValue(TEL, idxs, dt),
-                    FAX : getColValue(FAX, idxs, dt),
-                    URL : getColValue(URL, idxs, dt),
-                    MEMO : getColValue(MEMO, idxs, dt),
-                    ALT : getColValue(ALT, idxs, dt),
-                    LON : getColValue(LON, idxs, dt)
-                }
-                jsnObj.append(j)
-
-        jsonStr = json.dumps(jsnObj, ensure_ascii=False, indent=4)
-        fout.write(jsonStr)
-    except Exception as e:
-        print(e)
-        return
-    finally:
-        if fout is not None:
-            fout.close()
-        if fin is not None:
-            fin.close()
-
-def getHead(item):
-    item = item.replace('"','').replace("'",'').rstrip('\n').strip()
-
-    # colmun candidates
-    name = ['名称', '施設名', '分団名']
-    address = ['住所', '地番', '機庫所在地']
-    tel = ['TEL', '電話番号']
-    fax = ['FAX']
-    url = ['URL']
-    memo = ['設置場所', '備考', '備考1']
-    alt = ['世界_10進_Y']
-    lon = ['世界_10進_X']
-
-    if item in name:
-        return NAME
-    if item in address:
-        return ADDRESS
-    if item in tel:
-        return TEL
-    if item in fax:
-        return FAX
-    if item in url:
-        return URL
-    if item in memo:
-        return MEMO
-    if item in alt:
-        return ALT
-    if item in lon:
-        return LON
-
-    return None
-
-def getColValue(key, idxs, row):
-    idx = idxs[key]
-    if idx == None:
-        return None
-    else:
-        val = row[idx].replace('"','').replace("'",'').rstrip('\n').strip()
-        return val
-
-def mkDir(dirPath):
-    if not os.path.exists(dirPath) and not os.path.isdir(dirPath):
-        print ("dir not exists.")
-        os.mkdir(dirPath)
-
-# parse start
-print("start..")
-print(datetime.datetime.now())
-
-# パース結果を詰めるリスト
-itemList = []
-
-# roopパース
-index = IDX_START
-while IDX_START <= index and index <= int(count_page):
-    # パース対象ページのURLを取得
-    targetUrl = mainURL.replace("__PAGE__", str(index) )
-
-    # 読み込んでパース
-    result = parseNews(targetUrl)
-    if result is None:
-        break;
-    else:
-        itemList.extend(result)
-
-    # 経過をログ出力
-    print("page index is " + str(index))
-
-    index +=1
-
-# パース結果をjson形式で出力
-jsonString = json.dumps(itemList, ensure_ascii=False, indent=4)
-nowfmt = datetime.datetime.now().strftime("%Y%m%d")
-output_json_file = "tsuyama_" + nowfmt + ".json"
-with open(output_json_file, "w") as fh:
-    fh.write(jsonString)
-
-# finish
-print("page index is " + str(index))
-print("finish parse and output json file.[" + output_json_file + "]")
-print(datetime.datetime.now())
+# from AWS lambda
+def lambda_handler(event, context):
+    main()
