@@ -25,21 +25,25 @@ urlDataSetBase = "http://www.okayama-opendata.jp/opendata/ga120PreAction.action?
 urlResBase = "http://www.okayama-opendata.jp/opendata/ga130PreAction.action?keyTitle=__KEYTITLEID__&resourceId=__RESID__&datasetId=__DATASETID__"
 
 # start page (the minimum page is 1)
-#IDX_START = 13
+# IDX_START = 1
 IDX_START = int(os.environ['IDX_START'])
 
 # 読み込みページ数
-#COUNT_PAGE = 13
+# COUNT_PAGE = 13
 COUNT_PAGE = int(os.environ['COUNT_PAGE'])
 
 TMP_DIR = ut.TMP_DIR
+
+is_lambda = True
 
 # パースメインメソッド
 def parseMain(url, dummy):
 
     try:
+        print("url:" + url)
         html = urlopen(url)
-    except:
+    except Exception as e:
+        print("Http Error:" + e.args)
         return None
 
     soup = BeautifulSoup(html,"html.parser")
@@ -52,27 +56,56 @@ def parseMain(url, dummy):
     if isinstance(items, type(None)) or not items:
         return None
 
+    p = None
     for item in items:
-        content = item.find('div',{"class":"dataset-content"})
-        dtfmt = content.find('ul',{"class":"dataset-resources"})
-        fmt = dtfmt.find('li').find('a').get('data-format')
-        fmt = fmt.lower()
-        if not (fmt == 'csv' or fmt == 'jpg'):
-            continue
+        p = Process(target=processItem, args=(item, "dummy"))
+        p.start()
+    
+    if p:
+        p.join()
 
-        name = content.find('h3',{"class":"dataset-heading"}).find('a').get_text()
-        hiddenFld = content.find('div')
-        inpDataSetID = hiddenFld.find('input',{"id":"datasetId"}).get('value')
-        inpKeyTitle = hiddenFld.find('input',{"id":"keyTitle"}).get('value')
-        datasetName = hiddenFld.find('input',{"id":"title"}).get('value')
-        urlDataSet = urlDataSetBase.replace("__DATASETID__",inpDataSetID).replace("__KEYTITLEID__",inpKeyTitle)
-        resourceIds = getResourceId(urlDataSet)
+def processItem(item, dummy):
+    content = item.find('div',{"class":"dataset-content"})
+    dtfmt = content.find('ul',{"class":"dataset-resources"})
+    fmt = dtfmt.find('li').find('a').get('data-format')
+    fmt = fmt.lower()
+    if not (fmt == 'csv' or fmt == 'jpg'):
+        # only csv or jpg
+        return
 
-        arrayResIds = resourceIds.split(",")
-        for aId in arrayResIds:
-            a_url = urlResBase.replace("__DATASETID__",inpDataSetID).replace("__KEYTITLEID__",inpKeyTitle).replace("__RESID__",aId)
-            s_url = getResFileNm(a_url)
-            downloadFile(s_url, fmt, datasetName)
+    name = content.find('h3',{"class":"dataset-heading"}).find('a').get_text()
+    hiddenFld = content.find('div')
+    inpDataSetID = hiddenFld.find('input',{"id":"datasetId"}).get('value')
+    inpKeyTitle = hiddenFld.find('input',{"id":"keyTitle"}).get('value')
+    datasetName = hiddenFld.find('input',{"id":"title"}).get('value')
+    urlDataSet = urlDataSetBase.replace("__DATASETID__",inpDataSetID).replace("__KEYTITLEID__",inpKeyTitle)
+    resourceIds = getResourceId(urlDataSet)
+
+    arrayResIds = resourceIds.split(",")
+    # p = None
+    hashStr = datasetName.encode('utf-8')
+    hashStr = hashlib.md5(hashStr).hexdigest()
+    dirPath = TMP_DIR + fmt + '/' + hashStr + '/'
+
+    for aId in arrayResIds:
+        # p = Process(target=processDownload, args=(aId, inpDataSetID, inpKeyTitle, datasetName, fmt, "dummy"))
+        # p.start()
+        processDownload(aId, inpDataSetID, inpKeyTitle, datasetName, fmt, dirPath, hashStr, "dummy")
+    # if p:
+        # p.join()
+    
+    # upload dirname text
+    ut.mkDirNameText(dirPath, datasetName)
+    outpath = dirPath + 'dirname.txt'
+    if fmt == 'csv':
+        fmt = 'json'
+    uploadPath = fmt + '/' + hashStr + '/' + 'dirname.txt'
+    ul.uploadToBucketDirect(outpath, uploadPath)
+
+def processDownload(aId, inpDataSetID, inpKeyTitle, datasetName, fmt, dirPath, hashStr, dummy):
+    a_url = urlResBase.replace("__DATASETID__",inpDataSetID).replace("__KEYTITLEID__",inpKeyTitle).replace("__RESID__",aId)
+    s_url = getResFileNm(a_url)
+    downloadFile(s_url, fmt, datasetName, dirPath, hashStr)
 
 def getResourceId(url):
     try:
@@ -92,12 +125,12 @@ def getResFileNm(url):
     ret = plainValue.replace('\r\n','').replace('\t','')
     return ret
 
-def downloadFile(url, fileType, dirName):
+def downloadFile(url, fileType, dirName, dirPath, hashStr):
     # print('downloading.. ' + url)
     resFile = urlopen(url)
     tmp = url.split('/')
     fileName = tmp[-1]
-    dirPath = TMP_DIR + fileType + '/' + dirName + '/'
+
 
     # if dir not exists, make it. ./tmp/csv or ./tmp/jpg
     ut.mkDir(TMP_DIR + fileType)
@@ -111,15 +144,15 @@ def downloadFile(url, fileType, dirName):
     outpath = ''
     if fileType == 'csv':
         # parse csv and convert to json
-        outpath = pcj.parseCsv(dirName, fileName)
+        outpath = pcj.parseCsv(hashStr, fileName)
         fileType = 'json'
     elif fileType == 'jpg':
         # resize jpg to small
-        outpath = rimg.resizeImage(dirName, fileName)
+        outpath = rimg.resizeImage(hashStr, fileName)
 
     # upload to s3 bucket
-    if not isinstance(outpath,type(None)):
-        prefix = fileType + '/' + dirName
+    if not isinstance(outpath,type(None)) and is_lambda:
+        prefix = fileType + '/' + hashStr
         ul.uploadToBucket(outpath, prefix)
 
 def main():
@@ -128,7 +161,8 @@ def main():
     print(datetime.datetime.now())
 
     # delete s3 contents
-    ul.delDirInBucket()
+    if is_lambda:
+        ul.delDirInBucket()
 
     # roopパース
     index = IDX_START
@@ -151,8 +185,10 @@ def main():
 
 # from local
 if __name__ == '__main__':
+    is_lambda = False
     main()
 
 # from AWS lambda
 def lambda_handler(event, context):
+    is_lambda = True
     main()

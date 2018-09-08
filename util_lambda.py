@@ -1,5 +1,4 @@
 import boto3
-
 s3 = boto3.resource('s3')
 bucket = s3.Bucket('tsuyama-open')
 
@@ -16,3 +15,6 @@ def uploadToBucket(filePath, prefix):
     fileName = tmp[-1]
     upPath = prefix + '/' + fileName
     bucket.upload_file(filePath, upPath)
+
+def uploadToBucketDirect(filePath, uploadPath):
+    bucket.upload_file(filePath, uploadPath)
